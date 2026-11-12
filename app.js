@@ -8,6 +8,8 @@
   const cfg = window.PANEL_CONFIG || {};
   const SUPABASE_URL = cfg.SUPABASE_URL;
   const SUPABASE_ANON_KEY = cfg.SUPABASE_ANON_KEY;
+  // Orquestador local (npm run orquestador). Se puede cambiar en config.js.
+  const ORQUESTADOR_URL = cfg.ORQUESTADOR_URL || "http://127.0.0.1:8787";
 
   const $ = (sel, root) => (root || document).querySelector(sel);
   const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
@@ -948,6 +950,129 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* Centro de control (orquestador local)                               */
+  /* ------------------------------------------------------------------ */
+
+  let corridaTimer = null;
+
+  function detenerPoll() {
+    if (corridaTimer) {
+      clearInterval(corridaTimer);
+      corridaTimer = null;
+    }
+  }
+
+  function resumenLinea(resumen) {
+    const orden = ["leads", "encontrados", "existentes", "calificados",
+      "borradores", "seguimientos", "descartados", "fallidos"];
+    const claves = Object.keys(resumen || {});
+    const partes = orden.filter((k) => typeof resumen[k] === "number")
+      .concat(claves.filter((k) => !orden.includes(k)))
+      .map((k) => k + ": " + resumen[k]);
+    return partes.length ? partes.join(" · ") : "sin contadores en la salida";
+  }
+
+  function abrirModalCorrida() {
+    openModal(
+      '<div class="modal-head"><div class="modal-head-main">' +
+      '<div class="modal-title">Correr sistema</div>' +
+      '<div class="modal-sub">corrida → seguimiento. El envío de correos no se toca.</div></div>' +
+      '<button class="modal-close" data-action="close-modal" aria-label="Cerrar">✕</button></div>' +
+      '<div class="modal-body"><p id="corrida-estado" style="font-size:13.5px;color:var(--ink-2)">Iniciando…</p>' +
+      '<pre id="corrida-log" class="corrida-log" hidden></pre></div>' +
+      '<div class="modal-foot"><button class="btn btn--ghost" data-action="close-modal">Cerrar</button></div>',
+      "wide"
+    );
+  }
+
+  async function correrSistema(btn) {
+    if (btn && btn.disabled) return;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "corriendo…";
+    }
+    detenerPoll();
+    abrirModalCorrida();
+
+    const estadoEl = $("#corrida-estado");
+    const logEl = $("#corrida-log");
+
+    try {
+      const res = await fetch(ORQUESTADOR_URL + "/correr?esperar=0", { method: "POST" });
+      const datos = await res.json().catch(() => ({}));
+      if (res.status === 409) {
+        toast("Ya hay una corrida en curso.", true);
+      } else if (!res.ok) {
+        throw new Error(datos.error || "HTTP " + res.status);
+      }
+    } catch (error) {
+      closeModal();
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Correr sistema";
+      }
+      toast("Abre el centro de control con `npm run orquestador`", true);
+      return;
+    }
+
+    const terminar = (datos) => {
+      detenerPoll();
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Correr sistema";
+      }
+      const ultima = datos && datos.ultima;
+      const estadoActual = $("#corrida-estado");
+      const logActual = $("#corrida-log");
+      if (!estadoActual || !logActual) return; // el usuario cerró el modal
+      if (!ultima) {
+        estadoActual.textContent = "La corrida terminó sin resultado.";
+        return;
+      }
+      const segundos = Math.round(ultima.duracionMs / 1000);
+      const pasos = (ultima.pasos || [])
+        .map((p) => (p.ok ? "✓ " : "✗ ") + p.nombre)
+        .join(" · ");
+      estadoActual.innerHTML =
+        (ultima.ok ? "Listo" : "Terminó con errores") + " en " + segundos + " s · " + esc(pasos) +
+        '<br><span style="font-size:12.5px">' + esc(resumenLinea(ultima.resumen)) + "</span>";
+      logActual.hidden = false;
+      logActual.textContent = ultima.log || "(sin salida)";
+      toast(ultima.ok ? "Corrida terminada: " + resumenLinea(ultima.resumen) : "La corrida terminó con errores.", !ultima.ok);
+    };
+
+    const consultar = async () => {
+      try {
+        const res = await fetch(ORQUESTADOR_URL + "/estado", { cache: "no-store" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const datos = await res.json();
+        const estadoActual = $("#corrida-estado");
+        const logActual = $("#corrida-log");
+        if (!estadoActual) { detenerPoll(); return; }
+        if (datos.corriendo) {
+          estadoActual.textContent = "Ejecutando " + (datos.pasoActual || "pipeline") + "…";
+          if (datos.log) {
+            logActual.hidden = false;
+            logActual.textContent = datos.log;
+          }
+          return;
+        }
+        terminar(datos);
+      } catch (error) {
+        detenerPoll();
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "Correr sistema";
+        }
+        toast("Se perdió la conexión con el orquestador.", true);
+      }
+    };
+
+    corridaTimer = setInterval(consultar, 2000);
+    setTimeout(consultar, 600);
+  }
+
+  /* ------------------------------------------------------------------ */
   /* Modales y confirmaciones                                            */
   /* ------------------------------------------------------------------ */
 
@@ -1032,6 +1157,7 @@
       case "open-menu": openMenu(); break;
       case "close-menu": closeMenu(); break;
       case "close-modal": closeModal(); break;
+      case "correr-sistema": await correrSistema(el); break;
       case "lead": openLead(el.dataset.id); break;
       case "more-leads": {
         state.leadLimit += 60;
