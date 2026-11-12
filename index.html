@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Panel · Agencia</title>
+  <meta name="description" content="Panel interno para administrar leads, clientes, proyectos y borradores de la agencia.">
+  <meta name="theme-color" content="#14201b">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <noscript>Este panel necesita JavaScript para funcionar.</noscript>
+
+  <!-- Login -->
+  <div id="login-view" class="login-shell">
+    <div class="login-card">
+      <div class="brand brand--dark">
+        <span class="brand-mark" aria-hidden="true">A</span>
+        <span class="brand-text">agencia<span>·panel</span></span>
+      </div>
+      <h1 class="login-title">Administra la agencia<br>en un solo lugar.</h1>
+      <p class="login-sub">Leads, clientes, proyectos y borradores. Solo para el equipo.</p>
+
+      <form id="login-form" class="login-form" autocomplete="on">
+        <label for="login-email">Email</label>
+        <input id="login-email" name="email" type="email" autocomplete="username" required placeholder="tu@email.com">
+
+        <label for="login-password">Contraseña</label>
+        <div class="password-wrap">
+          <input id="login-password" name="password" type="password" autocomplete="current-password" required placeholder="••••••••••">
+          <button type="button" class="ghost-btn" data-action="toggle-password" aria-label="Mostrar contraseña">Ver</button>
+        </div>
+
+        <p id="login-error" class="form-error" hidden></p>
+        <button id="login-submit" class="btn btn--primary btn--block" type="submit">Entrar al panel</button>
+      </form>
+
+      <p class="login-foot">Acceso restringido. Si no tienes cuenta, pídele a Joaquín que te agregue al equipo.</p>
+    </div>
+
+    <aside class="login-aside" aria-hidden="true">
+      <div class="login-aside-inner">
+        <p class="eyebrow">Operación diaria</p>
+        <h2>Menos planillas.<br>Más clientes cerrados.</h2>
+        <ul class="login-list">
+          <li><span>01</span> Revisa y aprueba borradores de correo.</li>
+          <li><span>02</span> Sigue el estado de cada lead y cliente.</li>
+          <li><span>03</span> Controla proyectos, montos y entregas.</li>
+        </ul>
+        <div class="login-quote">
+          <p>“La agencia corre mejor cuando todos miran el mismo tablero.”</p>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- App -->
+  <div id="app-view" class="app" hidden>
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-top">
+        <div class="brand brand--light">
+          <span class="brand-mark" aria-hidden="true">A</span>
+          <span class="brand-text">agencia<span>·panel</span></span>
+        </div>
+        <button class="icon-btn sidebar-close" data-action="close-menu" aria-label="Cerrar menú">✕</button>
+      </div>
+
+      <nav class="nav" aria-label="Secciones">
+        <button class="nav-item" data-view="resumen"><span class="nav-ico">◧</span> Resumen</button>
+        <button class="nav-item" data-view="leads"><span class="nav-ico">◎</span> Leads <span id="nav-leads-badge" class="nav-badge" hidden></span></button>
+        <button class="nav-item" data-view="clientes"><span class="nav-ico">▤</span> Clientes</button>
+        <button class="nav-item" data-view="proyectos"><span class="nav-ico">◇</span> Proyectos</button>
+        <button class="nav-item" data-view="equipo"><span class="nav-ico">◍</span> Equipo</button>
+      </nav>
+
+      <div class="sidebar-links">
+        <p class="sidebar-label">Supabase</p>
+        <a href="https://supabase.com/dashboard/project/zeoftiimvtppnakozlky" target="_blank" rel="noopener">Panel del proyecto ↗</a>
+        <a href="https://supabase.com/dashboard/project/zeoftiimvtppnakozlky/editor" target="_blank" rel="noopener">Tablas ↗</a>
+        <a href="https://supabase.com/dashboard/project/zeoftiimvtppnakozlky/auth/users" target="_blank" rel="noopener">Usuarios de Auth ↗</a>
+        <p class="sidebar-label">Código</p>
+        <a href="https://github.com/JoaquinR0jas/agencia-panel" target="_blank" rel="noopener">Repositorio público ↗</a>
+      </div>
+
+      <div class="sidebar-foot">
+        <span id="sidebar-user" class="sidebar-user"></span>
+        <button class="btn btn--ghost btn--small" data-action="logout">Salir</button>
+      </div>
+    </aside>
+
+    <div id="sidebar-scrim" class="sidebar-scrim" data-action="close-menu"></div>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-btn menu-btn" data-action="open-menu" aria-label="Abrir menú">☰</button>
+        <div class="topbar-title">
+          <p class="eyebrow" id="view-eyebrow">Panel</p>
+          <h1 id="view-title">Resumen</h1>
+        </div>
+        <div class="topbar-actions">
+          <button class="icon-btn" data-action="reload" title="Actualizar datos" aria-label="Actualizar datos">↻</button>
+          <div class="user-chip">
+            <span id="user-avatar" class="avatar">–</span>
+            <span class="user-chip-text">
+              <strong id="user-name">—</strong>
+              <small id="user-role">—</small>
+            </span>
+          </div>
+          <button class="btn btn--ghost btn--small topbar-logout" data-action="logout">Salir</button>
+        </div>
+      </header>
+
+      <div id="loading-bar" class="loading-bar" hidden></div>
+      <div id="app-error" class="app-error" hidden></div>
+
+      <section id="view-root" class="view-root" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
