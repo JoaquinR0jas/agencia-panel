@@ -1892,8 +1892,8 @@
   function abrirModalCorrida() {
     openModal(
       '<div class="modal-head"><div class="modal-head-main">' +
-      '<div class="modal-title">Correr sistema</div>' +
-      '<div class="modal-sub">corrida → seguimiento. El envío de correos no se toca.</div></div>' +
+      '<div class="modal-title">Hacer todo</div>' +
+      '<div class="modal-sub">leads → webs → seguimientos → respaldo. El envío de correos no se toca.</div></div>' +
       '<button class="modal-close" data-action="close-modal" aria-label="Cerrar">✕</button></div>' +
       '<div class="modal-body"><p id="corrida-estado" style="font-size:13.5px;color:var(--ink-2)">Iniciando…</p>' +
       '<pre id="corrida-log" class="corrida-log" hidden></pre></div>' +
@@ -1915,7 +1915,7 @@
     const logEl = $("#corrida-log");
 
     try {
-      const res = await fetch(ORQUESTADOR_URL + "/correr?esperar=0", { method: "POST" });
+      const res = await fetch(ORQUESTADOR_URL + "/todo?esperar=0", { method: "POST" });
       const datos = await res.json().catch(() => ({}));
       if (res.status === 409) {
         toast("Ya hay una corrida en curso.", true);
@@ -1926,7 +1926,7 @@
       closeModal();
       if (btn) {
         btn.disabled = false;
-        btn.textContent = "Correr sistema";
+        btn.textContent = "Hacer todo";
       }
       toast("Abre el centro de control con `npm run orquestador`", true);
       return;
@@ -1936,7 +1936,7 @@
       detenerPoll();
       if (btn) {
         btn.disabled = false;
-        btn.textContent = "Correr sistema";
+        btn.textContent = "Hacer todo";
       }
       const ultima = datos && datos.ultima;
       const estadoActual = $("#corrida-estado");
@@ -1979,7 +1979,7 @@
         detenerPoll();
         if (btn) {
           btn.disabled = false;
-          btn.textContent = "Correr sistema";
+          btn.textContent = "Hacer todo";
         }
         toast("Se perdió la conexión con el orquestador.", true);
       }
