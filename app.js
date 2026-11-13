@@ -639,6 +639,13 @@
       .filter((p) => ["idea", "en_progreso", "revision"].includes(p.estado))
       .reduce((sum, p) => sum + (Number(p.monto) || 0), 0);
     const ganados = byEstado.ganado || 0;
+    const enviados = state.interacciones.filter((i) => i.enviado_at).length;
+    const respuestas = state.interacciones.filter((i) => i.estado === "respondido").length;
+    const reuniones = leads.filter((l) => ["reunion", "propuesta", "ganado"].includes(l.estado)).length;
+    const ingresos = state.proyectos
+      .filter((p) => p.estado === "entregado")
+      .reduce((sum, p) => sum + (Number(p.monto) || 0), 0);
+    const tasaRespuesta = enviados ? Math.round((respuestas / enviados) * 100) : 0;
 
     const maxBar = Math.max(1, ...LEAD_ESTADOS.map((e) => byEstado[e]));
     const topEstados = LEAD_ESTADOS
@@ -703,13 +710,22 @@
       "<div><span>Borradores</span><strong>" + borradores.length + " por revisar</strong></div>" +
       "</div></div></div>" +
 
+      '<p class="eyebrow" style="color:#8a7a5c;margin:4px 0 10px">Ventas</p>' +
+      '<div class="kpi-grid">' +
+      '<div class="kpi kpi--accent"><span class="kpi-label">Correos enviados</span><span class="kpi-value">' + enviados + '</span><span class="kpi-meta">' + tasaRespuesta + '% de respuesta</span></div>' +
+      '<div class="kpi"><span class="kpi-label">Respuestas</span><span class="kpi-value">' + respuestas + '</span><span class="kpi-meta">Conversaciones iniciadas</span></div>' +
+      '<div class="kpi"><span class="kpi-label">Reuniones</span><span class="kpi-value">' + reuniones + '</span><span class="kpi-meta">Reunión, propuesta o ganado</span></div>' +
+      '<div class="kpi"><span class="kpi-label">Ganados</span><span class="kpi-value">' + ganados + '</span><span class="kpi-meta">Clientes cerrados</span></div>' +
+      '<div class="kpi"><span class="kpi-label">Ingresos</span><span class="kpi-value" style="font-size:24px">' + esc(fmtMoney(ingresos)) + '</span><span class="kpi-meta">Proyectos entregados</span></div>' +
+      "</div>" +
+
+      '<p class="eyebrow" style="color:#8a7a5c;margin:22px 0 10px">Captación</p>' +
       '<div class="kpi-grid">' +
       '<div class="kpi kpi--accent"><span class="kpi-label">Leads activos</span><span class="kpi-value">' + activos + '</span><span class="kpi-meta">Sin descartados, perdidos ni ganados</span></div>' +
       '<div class="kpi"><span class="kpi-label">Borradores por aprobar</span><span class="kpi-value">' + borradores.length + '</span><span class="kpi-meta">No se envía nada al aprobar</span></div>' +
       '<div class="kpi"><span class="kpi-label">Clientes activos</span><span class="kpi-value">' + clientesActivos + '</span><span class="kpi-meta">' + state.clientes.length + " en cartera</span></div>" +
       '<div class="kpi"><span class="kpi-label">Proyectos en curso</span><span class="kpi-value">' + proyectosCurso.length + '</span><span class="kpi-meta">' + state.proyectos.length + " en total</span></div>" +
       '<div class="kpi"><span class="kpi-label">Pipeline abierto</span><span class="kpi-value" style="font-size:24px">' + esc(fmtMoney(pipeline)) + '</span><span class="kpi-meta">Idea + en curso + revisión</span></div>' +
-      '<div class="kpi"><span class="kpi-label">Leads ganados</span><span class="kpi-value">' + ganados + '</span><span class="kpi-meta">Cerrados a favor</span></div>' +
       "</div>" +
 
       '<div class="grid-2">' +
@@ -790,6 +806,17 @@
     return rows;
   }
 
+  function whatsappUrl(telefono, negocio, demo) {
+    const digitos = String(telefono || "").replace(/\D/g, "");
+    if (digitos.length < 8) return "";
+    const numero = digitos.startsWith("56") ? digitos : "56" + digitos.replace(/^0+/, "");
+    let texto = "Hola " + String(negocio || "").trim() +
+      ", soy Joaquín. Vi su negocio y armé una maqueta de cómo podría verse su página.";
+    if (safeUrl(demo)) texto += " Se la dejo acá: " + safeUrl(demo);
+    texto += " ¿Le doy una mirada?";
+    return "https://wa.me/" + numero + "?text=" + encodeURIComponent(texto);
+  }
+
   function renderLeadTable() {
     const wrap = $("#leads-table-wrap");
     if (!wrap) return;
@@ -807,9 +834,14 @@
       "<th>Negocio</th><th>Comuna</th><th>Score</th><th>Estado</th><th>Actualizado</th>" +
       "</tr></thead><tbody>" +
       shown.map((l) => {
+        const wa = l.telefono && !l.email
+          ? '<button class="btn btn--outline btn--small" data-action="whatsapp" data-phone="' + esc(l.telefono) +
+            '" data-negocio="' + esc(l.negocio) + '" data-demo="' + esc(l.demo_url || "") +
+            '" style="margin-top:6px">WhatsApp</button>'
+          : "";
         return '<tr class="is-clickable" data-action="lead" data-id="' + esc(l.id) + '">' +
           '<td><div class="cell-title">' + esc(l.negocio) + '</div><div class="cell-sub">' +
-          esc(l.rubro || "Sin rubro") + (l.email ? " · " + esc(l.email) : "") + "</div></td>" +
+          esc(l.rubro || "Sin rubro") + (l.email ? " · " + esc(l.email) : "") + "</div>" + wa + "</td>" +
           "<td>" + esc(l.comuna || "—") + "</td>" +
           "<td>" + scoreBadge(l.score) + "</td>" +
           "<td>" + chipLead(l.estado) + "</td>" +
@@ -906,6 +938,7 @@
     const demo = safeUrl(lead.demo_url)
       ? '<a class="btn btn--outline btn--small" href="' + esc(safeUrl(lead.demo_url)) + '" target="_blank" rel="noopener">Ver maqueta ↗</a>'
       : "";
+    const wa = whatsappUrl(lead.telefono, lead.negocio, lead.demo_url);
 
     body.innerHTML =
       '<div class="detail-grid">' +
@@ -926,6 +959,7 @@
         ? '<div class="detail-section"><h4>Notas</h4><p>' + esc(lead.notas) + "</p></div>"
         : "") +
       (demo ? '<div class="detail-section"><h4>Maqueta enviada</h4>' + demo + "</div>" : "") +
+      (wa ? '<div class="detail-section"><h4>Contacto rápido</h4><a class="btn btn--outline btn--small" href="' + esc(wa) + '" target="_blank" rel="noopener">Abrir WhatsApp ↗</a></div>' : "") +
       '<div class="detail-section"><h4>Estado del lead</h4>' +
       '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
       '<select id="lead-estado-select" data-action="set-lead-estado" data-id="' + esc(lead.id) + '" ' +
@@ -2132,6 +2166,12 @@
       }
       case "generar-borrador": await generarBorradorRelevo(el); break;
       case "copiar-retomar": await copiarRetomar(); break;
+      case "whatsapp": {
+        const url = whatsappUrl(el.dataset.phone, el.dataset.negocio, el.dataset.demo);
+        if (url) window.open(url, "_blank", "noopener");
+        else toast("Ese teléfono no sirve para WhatsApp.", true);
+        break;
+      }
       case "lead": openLead(el.dataset.id); break;
       case "more-leads": {
         state.leadLimit += 60;
