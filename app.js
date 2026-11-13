@@ -1795,11 +1795,15 @@
     let archivoError = "";
     if (ruta) {
       try {
-        await fetchOrquestador("/relevo/archivo", {
+        const respuesta = await fetchOrquestador("/relevo/archivo", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ruta, contenido: formatearRelevoMd(p, datos) })
-        }, 30000);
+          body: JSON.stringify({ ruta, contenido: formatearRelevoMd(p, datos), empujar: true })
+        }, 65000);
+        if (respuesta && respuesta.empujado === false) {
+          archivoError = "RELEVO.md quedó guardado, pero no se pudo subir a GitHub: " +
+            (respuesta.avisoEmpuje || "git push falló");
+        }
       } catch (error) {
         archivoError = mensajeOrquestador(error);
       }
@@ -1811,7 +1815,7 @@
     if (archivoError) {
       toast("Relevo guardado en Supabase. No se pudo escribir RELEVO.md: " + archivoError, true);
     } else {
-      toast("Relevo guardado y RELEVO.md actualizado.");
+      toast("Relevo guardado y RELEVO.md subido a GitHub.");
     }
     openProyectoDetalle(p.id, { tab: "relevo" });
   }
@@ -1856,12 +1860,41 @@
       return;
     }
 
+    let actualizacion = "";
+    const ruta = rutaEfectivaProyecto(p);
+    if (ruta) {
+      try {
+        const pull = await fetchOrquestador("/git/pull", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ruta })
+        }, 65000);
+        actualizacion = pull.actualizado
+          ? '<div style="margin-bottom:12px;padding:10px 12px;border-radius:8px;background:#eef6f0;color:#245c3a;font-size:12.5px">' +
+            "Código actualizado al último commit (" + esc(pull.commit || "sin commits") + ")." +
+            (pull.sinCommitear ? " Tienes " + pull.sinCommitear + " archivo(s) sin commitear en este PC." : "") +
+            "</div>"
+          : '<div style="margin-bottom:12px;padding:10px 12px;border-radius:8px;background:#fdf3e6;color:#7a4b12;font-size:12.5px">' +
+            "No se pudo actualizar el código: " + esc(pull.mensaje || "git pull falló") +
+            ". Revisa que no tengas cambios sin commitear." +
+            "</div>";
+      } catch (error) {
+        actualizacion = '<div style="margin-bottom:12px;padding:10px 12px;border-radius:8px;background:#fdf3e6;color:#7a4b12;font-size:12.5px">' +
+          "No pude actualizar el repo: " + esc(mensajeOrquestador(error)) + "</div>";
+      }
+    } else {
+      actualizacion = '<div style="margin-bottom:12px;padding:10px 12px;border-radius:8px;background:#fdf3e6;color:#7a4b12;font-size:12.5px">' +
+        "Este proyecto no tiene ruta local configurada en este PC. Configúrala para traer los últimos cambios." +
+        "</div>";
+    }
+
     openModal(
       '<div class="modal-head"><div class="modal-head-main">' +
       '<div class="modal-title">Retomar ' + esc(p.nombre) + "</div>" +
       '<div class="modal-sub">Copia este texto y pégalo en el chat de tu agente.</div></div>' +
       '<button class="modal-close" data-action="close-modal" aria-label="Cerrar">✕</button></div>' +
       '<div class="modal-body">' +
+      actualizacion +
       '<textarea id="retomar-texto" class="copy-box" readonly rows="16" aria-label="Texto para retomar el proyecto">' +
       esc(textoRetomar(p, relevo)) + "</textarea>" +
       "</div>" +
