@@ -1324,7 +1324,7 @@
 
     detalleProyecto = {
       proyecto: p,
-      tab: opts && opts.tab === "relevo" ? "relevo" : "git",
+      tab: opts && ["relevo", "propuesta", "entrega"].includes(opts.tab) ? opts.tab : "git",
       ruta: rutaEfectivaProyecto(p),
       git: null,
       gitError: "",
@@ -1348,6 +1348,8 @@
       '<div class="tabs" role="tablist" aria-label="Detalle del proyecto">' +
       '<button class="tab" role="tab" aria-selected="false" data-action="detalle-tab" data-tab="git">Últimos cambios</button>' +
       '<button class="tab" role="tab" aria-selected="false" data-action="detalle-tab" data-tab="relevo">Relevo</button>' +
+      '<button class="tab" role="tab" aria-selected="false" data-action="detalle-tab" data-tab="propuesta">Propuesta</button>' +
+      '<button class="tab" role="tab" aria-selected="false" data-action="detalle-tab" data-tab="entrega">Entrega</button>' +
       "</div>" +
       '<div id="detalle-panel"></div>' +
       "</div>" +
@@ -1396,7 +1398,198 @@
       btn.setAttribute("aria-selected", active ? "true" : "false");
     });
 
-    panel.innerHTML = d.tab === "relevo" ? panelRelevoHtml(d) : panelGitHtml(d);
+    panel.innerHTML = d.tab === "relevo" ? panelRelevoHtml(d)
+      : d.tab === "propuesta" ? panelPropuestaHtml(d)
+      : d.tab === "entrega" ? panelEntregaHtml(d)
+      : panelGitHtml(d);
+  }
+
+  function propuestaDe(p) {
+    return Object.assign({ alcance: "", plazo: "", condiciones: "" }, p.propuesta || {});
+  }
+
+  function panelPropuestaHtml(d) {
+    const p = d.proyecto;
+    const prop = propuestaDe(p);
+    return '<div class="stack">' +
+      '<p class="field-hint">Completa esto y genera un PDF listo para enviar. Queda guardado en el proyecto.</p>' +
+      '<label class="detail-label" for="prop-alcance">Qué incluye</label>' +
+      '<textarea id="prop-alcance" rows="5" class="copy-box">' + esc(prop.alcance) + "</textarea>" +
+      '<div class="grid-2">' +
+      '<div><label class="detail-label" for="prop-plazo">Plazo de entrega</label>' +
+      '<input id="prop-plazo" value="' + esc(prop.plazo) + '" placeholder="Ej: 10 días hábiles"></div>' +
+      '<div><label class="detail-label" for="prop-precio">Precio (CLP)</label>' +
+      '<input id="prop-precio" type="number" min="0" step="1000" value="' + esc(String(p.monto || "")) + '"></div>' +
+      "</div>" +
+      '<label class="detail-label" for="prop-condiciones">Condiciones</label>' +
+      '<textarea id="prop-condiciones" rows="4" class="copy-box">' + esc(prop.condiciones) + "</textarea>" +
+      '<div class="draft-actions">' +
+      '<button class="btn btn--outline btn--small" data-action="guardar-propuesta" data-id="' + esc(p.id) + '">Guardar propuesta</button>' +
+      '<button class="btn btn--primary btn--small" data-action="pdf-propuesta" data-id="' + esc(p.id) + '">Generar PDF</button>' +
+      "</div></div>";
+  }
+
+  function checklistDe(p) {
+    if (Array.isArray(p.checklist) && p.checklist.length) return p.checklist;
+    return [
+      "Dominio comprado o conectado",
+      "Deploy publicado",
+      "SSL / HTTPS activo",
+      "Analítica instalada",
+      "Formulario de contacto probado",
+      "Botón de WhatsApp",
+      "SEO básico (título, descripción, mapa)",
+      "Respaldo del sitio",
+      "Accesos entregados al cliente",
+      "Capacitación rápida",
+    ].map((item) => ({ item, hecho: false }));
+  }
+
+  function panelEntregaHtml(d) {
+    const p = d.proyecto;
+    const items = checklistDe(p);
+    const hechos = items.filter((i) => i.hecho).length;
+    const lista = items.map((i, n) =>
+      '<label class="check-row"><input type="checkbox" data-action="checklist-toggle" data-id="' +
+      esc(p.id) + '" data-n="' + n + '"' + (i.hecho ? " checked" : "") + "> " + esc(i.item) + "</label>"
+    ).join("");
+    const aud = p.auditoria;
+    const resumen = aud ? (aud.resumen || "") : "";
+    const audHtml = aud
+      ? '<div class="notice"><strong>Auditoría:</strong> ' + esc(resumen) + "</div>"
+      : '<p class="field-hint">Sin auditoría todavía.</p>';
+    return '<div class="stack">' +
+      '<div class="panel-head"><div><div class="panel-title">Checklist de entrega</div>' +
+      '<div class="panel-sub">' + hechos + " de " + items.length + " listos</div></div></div>" +
+      '<div class="checklist">' + lista + "</div>" +
+      '<div class="grid-2">' +
+      '<div><label class="detail-label" for="entrega-agenda">Link de agenda</label>' +
+      '<input id="entrega-agenda" value="' + esc(p.agenda_url || "") + '" placeholder="https://cal.com/tu-usuario/30min">' +
+      '<button class="btn btn--outline btn--small" data-action="guardar-agenda" data-id="' + esc(p.id) + '" style="margin-top:8px">Guardar agenda</button></div>' +
+      '<div><div class="detail-label">Auditar sitio</div>' +
+      '<button class="btn btn--outline btn--small" data-action="auditar-proyecto" data-id="' + esc(p.id) + '">Auditar sitio</button></div>' +
+      "</div>" + audHtml + "</div>";
+  }
+
+  function generarPropuestaPdf(p) {
+    const prop = propuestaDe(p);
+    const cliente = clienteNombre(p.cliente_id);
+    const hoy = new Date().toLocaleDateString("es-CL", { day: "numeric", month: "long", year: "numeric" });
+    const monto = Number(p.monto) || 0;
+    const documento = "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\">" +
+      "<title>Propuesta - " + esc(p.nombre) + "</title><style>" +
+      "@page{size:A4;margin:20mm}body{font-family:Georgia,'Times New Roman',serif;color:#1c1a17;line-height:1.55;font-size:13px}" +
+      "h1{font-size:26px;margin:0 0 4px}h2{font-size:13px;text-transform:uppercase;letter-spacing:.12em;margin:26px 0 8px;color:#6b5b3e}" +
+      ".marca{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#6b5b3e}" +
+      ".linea{border-top:1px solid #d8cfbf;margin:18px 0}.meta{display:flex;gap:40px;margin-top:14px;font-size:12px}" +
+      ".meta span{display:block;color:#6b5b3e;font-size:10px;text-transform:uppercase;letter-spacing:.1em}" +
+      ".precio{font-size:22px;font-weight:bold;margin-top:6px}ul{padding-left:18px}li{margin-bottom:5px}" +
+      ".firma{display:flex;gap:60px;margin-top:60px}.firma div{flex:1;border-top:1px solid #1c1a17;padding-top:6px;font-size:11px}" +
+      "p{margin:0 0 10px}@media print{.no-print{display:none}}" +
+      "</style></head><body>" +
+      "<div class=\"marca\">Joaquín Rojas · Desarrollo web y sistemas</div>" +
+      "<h1>Propuesta para " + esc(cliente) + "</h1>" +
+      "<p>Proyecto: " + esc(p.nombre) + "</p>" +
+      "<div class=\"meta\"><div><span>Fecha</span>" + esc(hoy) + "</div>" +
+      "<div><span>Plazo</span>" + esc(prop.plazo || "a convenir") + "</div>" +
+      "<div><span>Valor</span><div class=\"precio\">" + esc(fmtMoney(monto)) + "</div></div></div>" +
+      "<div class=\"linea\"></div>" +
+      "<h2>Qué incluye</h2><p>" + esc(prop.alcance || "Desarrollo del sitio web según lo conversado.").replace(/\n/g, "<br>") + "</p>" +
+      "<h2>Condiciones</h2><p>" + esc(prop.condiciones || "50% al aprobar y 50% contra entrega. Incluye una ronda de ajustes.").replace(/\n/g, "<br>") + "</p>" +
+      "<h2>Aceptación</h2><p>Al firmar, se da inicio al proyecto y se agenda la primera reunión de trabajo.</p>" +
+      "<div class=\"firma\"><div>Joaquín Rojas</div><div>" + esc(cliente) + "</div></div>" +
+      "<p class=\"no-print\" style=\"margin-top:30px;font-family:sans-serif;font-size:11px;color:#6b5b3e\">" +
+      "Usa Ctrl+P o el botón de imprimir para guardar como PDF.</p>" +
+      "</body></html>";
+
+    const ventana = window.open("", "_blank");
+    if (!ventana) {
+      toast("El navegador bloqueó la ventana. Permite las ventanas emergentes para generar el PDF.", true);
+      return;
+    }
+    ventana.document.write(documento);
+    ventana.document.close();
+    ventana.focus();
+    setTimeout(() => ventana.print(), 500);
+  }
+
+  async function actualizarProyecto(id, cambios) {
+    const { error } = await db.from("proyectos").update(cambios).eq("id", id);
+    if (error) throw error;
+    const p = state.proyectos.find((x) => String(x.id) === String(id));
+    if (p) Object.assign(p, cambios);
+    return p;
+  }
+
+  async function guardarPropuesta(id) {
+    const p = state.proyectos.find((x) => String(x.id) === String(id));
+    if (!p) return;
+    const alcance = ($("#prop-alcance")?.value || "").trim();
+    const plazo = ($("#prop-plazo")?.value || "").trim();
+    const condiciones = ($("#prop-condiciones")?.value || "").trim();
+    const monto = Number($("#prop-precio")?.value) || null;
+    try {
+      await actualizarProyecto(id, { propuesta: { alcance, plazo, condiciones }, monto });
+      toast("Propuesta guardada.");
+      renderDetallePanel();
+    } catch (error) {
+      toast("No se pudo guardar: " + errMsg(error), true);
+    }
+  }
+
+  async function toggleChecklist(el) {
+    const id = el.dataset.id;
+    const p = state.proyectos.find((x) => String(x.id) === String(id));
+    if (!p) return;
+    const items = checklistDe(p).map((item, n) =>
+      n === Number(el.dataset.n) ? Object.assign({}, item, { hecho: el.checked }) : item
+    );
+    try {
+      await actualizarProyecto(id, { checklist: items });
+      renderDetallePanel();
+    } catch (error) {
+      toast("No se pudo guardar el checklist: " + errMsg(error), true);
+    }
+  }
+
+  async function guardarAgenda(id) {
+    const valor = ($("#entrega-agenda")?.value || "").trim() || null;
+    try {
+      await actualizarProyecto(id, { agenda_url: valor });
+      toast("Link de agenda guardado.");
+    } catch (error) {
+      toast("No se pudo guardar: " + errMsg(error), true);
+    }
+  }
+
+  async function auditarProyecto(id) {
+    const p = state.proyectos.find((x) => String(x.id) === String(id));
+    if (!p) return;
+    const url = p.demo_url || p.repo_url;
+    if (!url) {
+      toast("El proyecto no tiene demo ni repo para auditar.", true);
+      return;
+    }
+    try {
+      const res = await fetchOrquestador("/auditar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url })
+      }, 60000);
+      const a = res.auditoria || {};
+      const partes = [
+        a.caido ? "Sitio caído" : "Responde",
+        a.https ? "HTTPS" : "Sin HTTPS",
+        a.responsive ? "Adaptado a celular" : "No adaptado a celular",
+        a.formulario ? "Con formulario" : "Sin formulario",
+        a.whatsapp ? "Con WhatsApp" : "Sin WhatsApp"
+      ];
+      await actualizarProyecto(id, { auditoria: Object.assign({}, a, { resumen: partes.join(" · ") }) });
+      toast("Auditoría lista.");
+      renderDetallePanel();
+    } catch (error) {
+      toast("No se pudo auditar: " + mensajeOrquestador(error), true);
+    }
   }
 
   function panelGitHtml(d) {
@@ -2203,7 +2396,7 @@
       case "detalle-proyecto": openProyectoDetalle(el.dataset.id); break;
       case "detalle-tab": {
         if (!detalleProyecto) break;
-        detalleProyecto.tab = el.dataset.tab === "relevo" ? "relevo" : "git";
+        detalleProyecto.tab = ["relevo", "propuesta", "entrega"].includes(el.dataset.tab) ? el.dataset.tab : "git";
         renderDetallePanel();
         break;
       }
@@ -2226,6 +2419,15 @@
         else toast("Ese teléfono no sirve para WhatsApp.", true);
         break;
       }
+      case "guardar-propuesta": await guardarPropuesta(el.dataset.id); break;
+      case "pdf-propuesta": {
+        const proyectoPdf = state.proyectos.find((x) => String(x.id) === String(el.dataset.id));
+        if (proyectoPdf) generarPropuestaPdf(proyectoPdf);
+        break;
+      }
+      case "checklist-toggle": await toggleChecklist(el); break;
+      case "guardar-agenda": await guardarAgenda(el.dataset.id); break;
+      case "auditar-proyecto": await auditarProyecto(el.dataset.id); break;
       case "lead": openLead(el.dataset.id); break;
       case "more-leads": {
         state.leadLimit += 60;
