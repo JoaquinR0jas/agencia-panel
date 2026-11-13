@@ -822,6 +822,7 @@
         "Se la dejo acá para que la mire con calma: " + enlace,
         "La idea es que alguien que los busca en Google encuentre al tiro los horarios, la ubicación, las fotos y una forma directa de escribirles por WhatsApp, sin depender solo de Instagram.",
         "No es una propuesta cerrada. Si les gusta, la adapto con su logo, sus fotos y sus precios, y la dejo funcionando en pocos días. Si no, no hay problema: igual les sirve para comparar con lo que tienen hoy.",
+        "Y si más adelante necesitan algo más completo que una página, también armo sistemas a medida: un CRM para ordenar clientes, ventas y seguimientos, una agenda online o un panel para manejar pedidos. Se los puedo mostrar cuando quieran, sin compromiso.",
         "¿La revisan y me dicen qué les parece?",
       ]
       : [
@@ -829,6 +830,7 @@
           " y me puse a imaginar cómo podría verse una página web que de verdad les sirva: simple, rápida y pensada para celular.",
         "Trabajo armando sitios para negocios pequeños. La idea no es tener una página por tenerla, sino que alguien que los busca encuentre los horarios, la ubicación, las fotos y una forma directa de escribirles por WhatsApp.",
         "Si les interesa, les armo una maqueta sin costo para que la vean antes de decidir. Si no, no hay problema.",
+        "Y si más adelante necesitan algo más completo que una página, también armo sistemas a medida: un CRM para ordenar clientes, ventas y seguimientos, una agenda online o un panel para manejar pedidos. Se los puedo mostrar cuando quieran, sin compromiso.",
         "¿Les parece si les cuento en dos minutos cómo quedaría?",
       ];
 
