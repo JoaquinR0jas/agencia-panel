@@ -113,6 +113,19 @@
 
   const ROL_LABEL = { admin: "Administrador", socio: "Socio", operador: "Operador" };
 
+  const RELEVO_ESTADOS = ["en_progreso", "bloqueado", "pausado", "terminado"];
+  const RELEVO_LABEL = {
+    en_progreso: "En progreso", bloqueado: "Bloqueado",
+    pausado: "Pausado", terminado: "Terminado"
+  };
+  const RELEVO_TONE = {
+    en_progreso: "info", bloqueado: "danger", pausado: "warn", terminado: "ok"
+  };
+
+  // La ruta local puede cambiar entre PC. El valor de `proyectos.ruta_local` es
+  // el default y esta clave de localStorage lo sobrescribe en este navegador.
+  const RUTA_STORAGE_PREFIX = "agencia:ruta-proyecto:";
+
   const VIEWS = {
     resumen: { title: "Resumen", eyebrow: "Vista general", render: renderResumen },
     leads: { title: "Leads", eyebrow: "Captación", render: renderLeads },
@@ -132,6 +145,11 @@
     clientes: [],
     proyectos: [],
     perfiles: [],
+    mensajes: [],
+    mensajesError: "",
+    mensajesTab: "bandeja",
+    mensajeAbiertoId: null,
+    mensajesTimer: null,
     view: "resumen",
     filtros: { q: "", estado: "", score: "0", sort: "reciente" },
     leadLimit: 60,
@@ -218,6 +236,7 @@
 
     switchView(state.view || "resumen");
     await loadAll();
+    startMensajesPoll();
   }
 
   async function boot() {
@@ -267,6 +286,7 @@
       state.proyectos = proyectos.data || [];
       state.perfiles = perfiles.data || [];
 
+      await loadMensajes();
       updateBadges();
       renderView();
     } catch (error) {
@@ -282,6 +302,250 @@
     if (badge) {
       badge.textContent = String(pendientes);
       badge.hidden = pendientes === 0;
+    }
+    updateMensajesBadge();
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Mensajes entre socios                                               */
+  /* ------------------------------------------------------------------ */
+
+  function nombrePerfil(userId) {
+    if (!userId) return "Alguien";
+    const p = state.perfiles.find((x) => String(x.user_id) === String(userId));
+    return p ? p.nombre : "Socio " + String(userId).slice(0, 8);
+  }
+
+  function mensajeNoLeido(m) {
+    if (!m || !state.perfil) return false;
+    if (String(m.de) === String(state.perfil.user_id)) return false;
+    return !(m.leido_por || []).includes(state.perfil.user_id);
+  }
+
+  function contarMensajesNoLeidos() {
+    return state.mensajes.filter(mensajeNoLeido).length;
+  }
+
+  function updateMensajesBadge() {
+    const badge = $("#btn-mensajes-badge");
+    const btn = $("#btn-mensajes");
+    if (!badge) return;
+    const n = contarMensajesNoLeidos();
+    badge.textContent = String(n);
+    badge.hidden = n === 0;
+    if (btn) {
+      btn.setAttribute("aria-label", n
+        ? "Abrir mensajes de socios. " + n + " sin leer."
+        : "Abrir mensajes de socios");
+    }
+  }
+
+  async function loadMensajes(opts) {
+    if (!state.perfil) return;
+    try {
+      const { data, error } = await db.from("mensajes_socios")
+        .select("id,de,para,asunto,cuerpo,leido_por,created_at")
+        .order("created_at", { ascending: false })
+        .limit(200);
+      if (error) throw error;
+      state.mensajes = data || [];
+      state.mensajesError = "";
+    } catch (error) {
+      state.mensajesError = errMsg(error);
+    }
+    updateMensajesBadge();
+    if (!opts || !opts.silencioso) {
+      // Si el modal está abierto en la bandeja, refresca la lista visible.
+      // No se re-renderiza mientras alguien escribe un mensaje.
+      const panel = $("#mensajes-panel");
+      if (panel && state.mensajesTab === "bandeja") renderMensajesPanel();
+    }
+  }
+
+  function startMensajesPoll() {
+    stopMensajesPoll();
+    state.mensajesTimer = setInterval(() => {
+      if (!state.perfil) return;
+      loadMensajes({ silencioso: false });
+    }, 60000);
+  }
+
+  function stopMensajesPoll() {
+    if (state.mensajesTimer) {
+      clearInterval(state.mensajesTimer);
+      state.mensajesTimer = null;
+    }
+  }
+
+  function mensajeParaTexto(m) {
+    if (!m.para) return "Todos";
+    if (state.perfil && String(m.para) === String(state.perfil.user_id)) return "Mí";
+    return nombrePerfil(m.para);
+  }
+
+  function abrirMensajes() {
+    state.mensajesTab = "bandeja";
+    openModal(
+      '<div class="modal-head"><div class="modal-head-main">' +
+      '<div class="modal-title">Mensajes de socios</div>' +
+      '<div class="modal-sub">Bandeja interna del panel. Los agentes usan otro buzón (mensajes_equipo).</div>' +
+      "</div>" +
+      '<button class="modal-close" data-action="close-modal" aria-label="Cerrar">✕</button></div>' +
+      '<div class="modal-body">' +
+      '<div class="tabs" role="tablist" aria-label="Mensajes">' +
+      '<button class="tab is-active" role="tab" aria-selected="true" data-action="mensajes-tab" data-tab="bandeja">Bandeja</button>' +
+      '<button class="tab" role="tab" aria-selected="false" data-action="mensajes-tab" data-tab="escribir">Escribir</button>' +
+      "</div>" +
+      '<div id="mensajes-panel"></div>' +
+      "</div>" +
+      '<div class="modal-foot"><button class="btn btn--ghost" data-action="close-modal">Cerrar</button></div>',
+      "wide"
+    );
+    renderMensajesPanel();
+    loadMensajes();
+  }
+
+  function renderMensajesPanel() {
+    const panel = $("#mensajes-panel");
+    if (!panel) return;
+
+    $$(".tabs [data-action='mensajes-tab']").forEach((btn) => {
+      const active = btn.dataset.tab === state.mensajesTab;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-selected", active ? "true" : "false");
+    });
+
+    if (state.mensajesTab === "escribir") {
+      const opciones = state.perfiles
+        .filter((p) => p.activo && state.perfil && String(p.user_id) !== String(state.perfil.user_id))
+        .map((p) => '<option value="' + esc(p.user_id) + '">' + esc(p.nombre) +
+          " · " + esc(ROL_LABEL[p.rol] || p.rol) + "</option>")
+        .join("");
+      panel.innerHTML =
+        '<form id="mensaje-form">' +
+        '<div class="form-grid">' +
+        '<div class="field field--full"><label for="msg-para">Para</label>' +
+        '<select id="msg-para" name="para"><option value="">Todos los socios</option>' + opciones + "</select></div>" +
+        '<div class="field field--full"><label for="msg-asunto">Asunto *</label>' +
+        '<input id="msg-asunto" name="asunto" required maxlength="160" placeholder="Ej: Revisar la propuesta de la barbería"></div>' +
+        '<div class="field field--full"><label for="msg-cuerpo">Mensaje *</label>' +
+        '<textarea id="msg-cuerpo" name="cuerpo" required maxlength="4000" placeholder="Escribe el mensaje…"></textarea></div>' +
+        '<p id="mensaje-form-error" class="form-error" hidden></p>' +
+        "</div>" +
+        '<div class="form-actions"><button type="submit" class="btn btn--primary">Enviar mensaje</button></div>' +
+        "</form>";
+      return;
+    }
+
+    if (state.mensajesError) {
+      panel.innerHTML =
+        '<div class="notice notice--warn"><strong>No se pudo leer la bandeja.</strong> ' +
+        esc(state.mensajesError) +
+        '<div class="notice-actions"><button class="btn btn--outline btn--small" data-action="refrescar-mensajes">Reintentar</button></div></div>';
+      return;
+    }
+
+    if (!state.mensajes.length) {
+      panel.innerHTML = emptyState("✉", "Sin mensajes todavía",
+        "Escribe el primero para coordinar con el resto del equipo.");
+      return;
+    }
+
+    panel.innerHTML = '<div class="inbox">' + state.mensajes.map((m) => {
+      const nuevo = mensajeNoLeido(m);
+      const abierto = String(state.mensajeAbiertoId) === String(m.id);
+      const cuerpo = String(m.cuerpo || "");
+      const extracto = cuerpo.length > 150 ? cuerpo.slice(0, 150).trim() + "…" : cuerpo;
+      return '<div class="msg' + (nuevo ? " msg--nuevo" : "") + '" role="button" tabindex="0" ' +
+        'data-action="abrir-mensaje" data-id="' + esc(m.id) + '" aria-expanded="' + (abierto ? "true" : "false") + '" ' +
+        'aria-label="' + esc("Mensaje de " + nombrePerfil(m.de) + ": " + m.asunto) + '">' +
+        '<div class="msg-head"><strong>' + esc(m.asunto) + "</strong>" +
+        (nuevo ? '<span class="chip chip--warn">Nuevo</span>' : "") +
+        '<span class="spacer"></span><span class="msg-date">' + esc(fmtDateTime(m.created_at)) + "</span></div>" +
+        '<div class="msg-meta">De ' + esc(nombrePerfil(m.de)) + " · Para " + esc(mensajeParaTexto(m)) + "</div>" +
+        '<p class="msg-excerpt">' + esc(abierto ? cuerpo : extracto) + "</p>" +
+        (!abierto && cuerpo.length > 150
+          ? '<span class="msg-more">Abrir para leer todo</span>'
+          : "") +
+        "</div>";
+    }).join("") + "</div>";
+  }
+
+  async function marcarMensajeLeido(m) {
+    if (!m || !state.perfil || !mensajeNoLeido(m)) return;
+    const uid = state.perfil.user_id;
+    const leidoPor = Array.from(new Set([...(m.leido_por || []), uid]));
+    m.leido_por = leidoPor;
+    updateMensajesBadge();
+    try {
+      const { error } = await db.from("mensajes_socios")
+        .update({ leido_por: leidoPor }).eq("id", m.id);
+      if (error) throw error;
+    } catch (error) {
+      toast("No se pudo marcar el mensaje como leído: " + errMsg(error), true);
+    }
+  }
+
+  function abrirMensaje(id) {
+    const m = state.mensajes.find((x) => String(x.id) === String(id));
+    if (!m) return;
+    if (String(state.mensajeAbiertoId) === String(id)) {
+      state.mensajeAbiertoId = null;
+    } else {
+      state.mensajeAbiertoId = m.id;
+      marcarMensajeLeido(m);
+    }
+    renderMensajesPanel();
+  }
+
+  function cambiarTabMensajes(tab) {
+    state.mensajesTab = tab === "escribir" ? "escribir" : "bandeja";
+    renderMensajesPanel();
+    const first = tab === "escribir" ? $("#msg-para") : null;
+    if (first) setTimeout(() => first.focus(), 30);
+  }
+
+  async function enviarMensaje(form) {
+    const fd = new FormData(form);
+    const para = String(fd.get("para") || "").trim() || null;
+    const asunto = String(fd.get("asunto") || "").trim();
+    const cuerpo = String(fd.get("cuerpo") || "").trim();
+    const errorEl = $("#mensaje-form-error");
+    const submit = form.querySelector('button[type="submit"]');
+
+    if (!asunto || !cuerpo) {
+      if (errorEl) {
+        errorEl.textContent = "El asunto y el mensaje son obligatorios.";
+        errorEl.hidden = false;
+      }
+      return;
+    }
+
+    if (submit) {
+      submit.disabled = true;
+      submit.textContent = "Enviando…";
+    }
+    try {
+      const { error } = await db.from("mensajes_socios").insert({
+        de: state.perfil.user_id,
+        para,
+        asunto,
+        cuerpo
+      });
+      if (error) throw error;
+      state.mensajesTab = "bandeja";
+      state.mensajeAbiertoId = null;
+      await loadMensajes();
+      toast(para ? "Mensaje enviado a " + nombrePerfil(para) + "." : "Mensaje enviado a todo el equipo.");
+    } catch (error) {
+      if (errorEl) {
+        errorEl.textContent = errMsg(error);
+        errorEl.hidden = false;
+      }
+      if (submit) {
+        submit.disabled = false;
+        submit.textContent = "Enviar mensaje";
+      }
     }
   }
 
@@ -421,7 +685,7 @@
 
     const proximosHtml = proximos.length
       ? proximos.map((p) => {
-        return '<div class="list-row" data-action="edit-proyecto" data-id="' + esc(p.id) + '" style="cursor:pointer">' +
+        return '<div class="list-row" data-action="detalle-proyecto" data-id="' + esc(p.id) + '" style="cursor:pointer">' +
           '<div class="list-main"><strong>' + esc(p.nombre) + "</strong><small>" +
           esc(clienteNombre(p.cliente_id)) + " · " + esc(PROYECTO_LABEL[p.estado] || p.estado) +
           '</small></div><div class="list-meta">' + esc(fmtDate(p.fecha_entrega)) + "</div></div>";
@@ -821,7 +1085,8 @@
           const links = [];
           if (safeUrl(p.repo_url)) links.push('<a class="panel-link" href="' + esc(safeUrl(p.repo_url)) + '" target="_blank" rel="noopener">Repo ↗</a>');
           if (safeUrl(p.demo_url)) links.push('<a class="panel-link" href="' + esc(safeUrl(p.demo_url)) + '" target="_blank" rel="noopener">Demo ↗</a>');
-          return '<tr><td><div class="cell-title">' + esc(p.nombre) + '</div><div class="cell-sub">' +
+          return '<tr><td><button class="link-btn cell-title-btn" data-action="detalle-proyecto" data-id="' +
+            esc(p.id) + '" title="Ver cambios y relevo">' + esc(p.nombre) + '</button><div class="cell-sub">' +
             esc(clienteNombre(p.cliente_id)) + "</div></td>" +
             "<td>" + chipProyecto(p.estado) + "</td>" +
             '<td class="num">' + esc(fmtMoney(p.monto)) + "</td>" +
@@ -867,6 +1132,9 @@
       (p && p.fecha_entrega ? esc(p.fecha_entrega) : "") + '"></div>' +
       '<div class="field"><label for="pr-repo">Repo URL</label><input id="pr-repo" name="repo_url" type="url" placeholder="https://github.com/…" value="' + value("repo_url") + '"></div>' +
       '<div class="field field--full"><label for="pr-demo">Demo URL</label><input id="pr-demo" name="demo_url" type="url" placeholder="https://…" value="' + value("demo_url") + '"></div>' +
+      '<div class="field field--full"><label for="pr-ruta">Ruta local del proyecto <span>(opcional)</span></label>' +
+      '<input id="pr-ruta" name="ruta_local" placeholder="C:\\Users\\juako\\Trabajo\\mi-proyecto" value="' + value("ruta_local") + '">' +
+      '<span class="field-hint">Sirve para leer los commits y escribir RELEVO.md desde este PC. Cada socio puede sobrescribirla en su navegador.</span></div>' +
       '<div class="field field--full"><label for="pr-notas">Notas</label><textarea id="pr-notas" name="notas">' + value("notas") + "</textarea></div>" +
       '<p id="proyecto-form-error" class="form-error" hidden></p>' +
       "</div></div>" +
@@ -891,6 +1159,7 @@
       fecha_entrega: String(fd.get("fecha_entrega") || "") || null,
       repo_url: String(fd.get("repo_url") || "").trim() || null,
       demo_url: String(fd.get("demo_url") || "").trim() || null,
+      ruta_local: String(fd.get("ruta_local") || "").trim() || null,
       notas: String(fd.get("notas") || "").trim() || null
     };
     const errorEl = $("#proyecto-form-error");
@@ -918,6 +1187,644 @@
       errorEl.hidden = false;
       submit.disabled = false;
       submit.textContent = id ? "Guardar cambios" : "Crear proyecto";
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Detalle de proyecto: cambios y relevo                               */
+  /* ------------------------------------------------------------------ */
+
+  let detalleProyecto = null;
+
+  async function fetchOrquestador(path, options, timeoutMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs || 12000);
+    try {
+      const res = await fetch(ORQUESTADOR_URL + path, Object.assign({}, options, {
+        signal: controller.signal
+      }));
+      const datos = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(datos.error || "HTTP " + res.status);
+      if (datos && datos.ok === false) throw new Error(datos.error || "El orquestador devolvió un error.");
+      return datos;
+    } catch (error) {
+      if (error && error.name === "AbortError") throw new Error("El orquestador no respondió a tiempo.");
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function mensajeOrquestador(error) {
+    const raw = errMsg(error);
+    if (/failed to fetch|networkerror|load failed|fetch/i.test(raw)) {
+      return "No pude hablar con el orquestador local (127.0.0.1:8787). Ábrelo con `npm run orquestador` en el repo de captación o usa Centro de control.";
+    }
+    return raw;
+  }
+
+  function rutaLocalGuardada(id) {
+    try {
+      return localStorage.getItem(RUTA_STORAGE_PREFIX + id) || "";
+    } catch (error) {
+      return "";
+    }
+  }
+
+  function guardarRutaLocalStorage(id, ruta) {
+    try {
+      if (ruta) localStorage.setItem(RUTA_STORAGE_PREFIX + id, ruta);
+      else localStorage.removeItem(RUTA_STORAGE_PREFIX + id);
+      return true;
+    } catch (error) {
+      toast("No se pudo guardar la ruta en este navegador: " + errMsg(error), true);
+      return false;
+    }
+  }
+
+  function rutaEfectivaProyecto(p) {
+    return rutaLocalGuardada(p.id) || p.ruta_local || "";
+  }
+
+  function errorRutaLocal(ruta) {
+    const r = String(ruta || "").trim();
+    if (!r) return "Falta la ruta local del proyecto.";
+    if (!/^[A-Za-z]:[\\/]/.test(r) && !/^\\\\/.test(r) && !r.startsWith("/")) {
+      return "Escribe una ruta absoluta. Ejemplo: C:\\Users\\juako\\Trabajo\\mi-proyecto";
+    }
+    return "";
+  }
+
+  function openProyectoDetalle(id, opts) {
+    const p = state.proyectos.find((x) => String(x.id) === String(id));
+    if (!p) return;
+
+    detalleProyecto = {
+      proyecto: p,
+      tab: opts && opts.tab === "relevo" ? "relevo" : "git",
+      ruta: rutaEfectivaProyecto(p),
+      git: null,
+      gitError: "",
+      cargandoGit: false,
+      resumen: "",
+      resumenError: "",
+      resumenCargando: false,
+      relevos: [],
+      relevosError: "",
+      cargandoRelevos: true
+    };
+
+    openModal(
+      '<div class="modal-head"><div class="modal-head-main">' +
+      '<div class="modal-title">' + esc(p.nombre) + "</div>" +
+      '<div class="modal-sub">' + esc(clienteNombre(p.cliente_id)) + " · cambios del repo y traspaso del proyecto</div>" +
+      "</div>" + chipProyecto(p.estado) +
+      '<button class="modal-close" data-action="close-modal" aria-label="Cerrar">✕</button></div>' +
+      '<div class="modal-body">' +
+      '<div id="detalle-ruta"></div>' +
+      '<div class="tabs" role="tablist" aria-label="Detalle del proyecto">' +
+      '<button class="tab" role="tab" aria-selected="false" data-action="detalle-tab" data-tab="git">Últimos cambios</button>' +
+      '<button class="tab" role="tab" aria-selected="false" data-action="detalle-tab" data-tab="relevo">Relevo</button>' +
+      "</div>" +
+      '<div id="detalle-panel"></div>' +
+      "</div>" +
+      '<div class="modal-foot">' +
+      '<button class="btn btn--ghost" data-action="detalle-editar" data-id="' + esc(p.id) + '">Editar proyecto</button>' +
+      '<button class="btn btn--outline" data-action="close-modal">Cerrar</button>' +
+      "</div>",
+      "wide"
+    );
+
+    renderDetalleRuta();
+    renderDetallePanel();
+    cargarRelevosDetalle();
+    cargarGitDetalle();
+  }
+
+  function renderDetalleRuta() {
+    const d = detalleProyecto;
+    const el = $("#detalle-ruta");
+    if (!d || !el) return;
+    const p = d.proyecto;
+    const guardada = rutaLocalGuardada(p.id);
+    const valor = guardada || p.ruta_local || "";
+    const origen = guardada
+      ? "Ruta guardada en este navegador."
+      : (p.ruta_local ? "Valor por defecto del proyecto." : "Todavía no hay una ruta configurada.");
+    el.innerHTML =
+      '<div class="detalle-ruta">' +
+      '<div class="detail-label">Ruta local del proyecto</div>' +
+      '<div class="inline-path">' +
+      '<input id="detalle-ruta-input" aria-label="Ruta local del proyecto" placeholder="C:\\Users\\juako\\Trabajo\\mi-proyecto" value="' + esc(valor) + '">' +
+      '<button class="btn btn--outline btn--small" data-action="guardar-ruta-detalle">Usar esta ruta</button>' +
+      "</div>" +
+      '<p class="field-hint">' + esc(origen) + " Se guarda solo en este navegador; el orquestador valida que exista.</p>" +
+      "</div>";
+  }
+
+  function renderDetallePanel() {
+    const d = detalleProyecto;
+    const panel = $("#detalle-panel");
+    if (!d || !panel) return;
+
+    $$(".tabs [data-action='detalle-tab']").forEach((btn) => {
+      const active = btn.dataset.tab === d.tab;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-selected", active ? "true" : "false");
+    });
+
+    panel.innerHTML = d.tab === "relevo" ? panelRelevoHtml(d) : panelGitHtml(d);
+  }
+
+  function panelGitHtml(d) {
+    if (!d.ruta) {
+      return '<div class="notice notice--warn"><strong>Sin ruta local.</strong> ' +
+        "Configúrala arriba o en «Editar proyecto» para leer los commits y escribir RELEVO.md.</div>";
+    }
+    if (d.cargandoGit) {
+      return '<p class="loading-inline">Consultando git en ' + esc(d.ruta) + "…</p>";
+    }
+    if (d.gitError) {
+      return '<div class="notice notice--warn"><strong>No pude leer los cambios.</strong> ' +
+        esc(d.gitError) +
+        '<div class="notice-actions"><button class="btn btn--outline btn--small" data-action="detalle-reintentar-git">Reintentar</button></div></div>';
+    }
+    if (!d.git) {
+      return '<p class="loading-inline">Sin datos de git todavía.</p>';
+    }
+
+    const commits = d.git.commits || [];
+    const rama = d.git.rama || "rama desconocida";
+    const commitsHtml = commits.length
+      ? '<div class="commit-list">' + commits.map((c) => {
+        const corto = c.corto || String(c.hash || "").slice(0, 7);
+        return '<div class="commit">' +
+          "<code>" + esc(corto || "—") + "</code>" +
+          '<div class="commit-main"><strong>' + esc(c.mensaje || "(sin mensaje)") + "</strong>" +
+          "<small>" + esc(c.autor || "sin autor") + " · " + esc(fmtDateTime(c.fecha)) + "</small></div>" +
+          "</div>";
+      }).join("") + "</div>"
+      : emptyState("◷", "Sin commits", "El repo no tiene commits o la rama está vacía.");
+
+    const resumenHtml = d.resumenCargando
+      ? '<p class="loading-inline">Resumiendo con IA…</p>'
+      : d.resumenError
+        ? '<div class="notice notice--warn">' + esc(d.resumenError) + "</div>"
+        : d.resumen
+          ? '<div class="resumen-ia">' + esc(d.resumen) + "</div>"
+          : "";
+
+    return '<div class="git-head">' +
+      chip("Rama " + rama, "info") +
+      (d.git.sinCommitear ? '<span class="chip chip--warn">Cambios sin commitear</span>' : "") +
+      '<span class="spacer"></span>' +
+      '<button class="btn btn--outline btn--small" data-action="detalle-reintentar-git">Actualizar</button>' +
+      "</div>" +
+      commitsHtml +
+      '<div class="detail-section"><div class="git-head">' +
+      '<h4 style="margin:0">Resumen del proyecto</h4><span class="spacer"></span>' +
+      '<button class="btn btn--primary btn--small" data-action="resumir-proyecto"' +
+      (d.resumenCargando ? " disabled" : "") + ">" +
+      (d.resumenCargando ? "Resumiendo…" : "Resumir con IA") + "</button></div>" +
+      '<p class="field-hint" style="margin-top:6px">El resumen lo genera el orquestador local y no modifica el repo.</p>' +
+      resumenHtml + "</div>";
+  }
+
+  function relevoCardHtml(r, opts) {
+    const autor = nombrePerfil(r.autor);
+    const parts = [];
+    if (r.rama) parts.push('<span class="chip chip--plain">Rama ' + esc(r.rama) + "</span>");
+    if (r.commit) parts.push('<span class="chip chip--plain">Commit ' + esc(String(r.commit).slice(0, 8)) + "</span>");
+
+    const bloque = (titulo, texto) => texto && String(texto).trim()
+      ? "<h4>" + esc(titulo) + "</h4><p>" + esc(texto) + "</p>"
+      : "";
+
+    return '<div class="relevo-card' + (opts && opts.destacado ? " relevo-card--last" : "") + '">' +
+      '<div class="relevo-head">' + chip(RELEVO_LABEL[r.estado] || r.estado || "—", RELEVO_TONE[r.estado] || "plain") +
+      '<span class="muted" style="font-size:12px">' + esc(autor) + " · " + esc(fmtDateTime(r.created_at)) + "</span>" +
+      '<span class="spacer"></span>' + parts.join(" ") + "</div>" +
+      '<div class="relevo-body">' +
+      bloque("Qué hice", r.hecho) +
+      bloque("Qué falta", r.pendientes) +
+      bloque("Decisiones", r.decisiones) +
+      bloque("Siguiente paso", r.siguiente) +
+      "</div></div>";
+  }
+
+  function panelRelevoHtml(d) {
+    if (d.cargandoRelevos) return '<p class="loading-inline">Cargando relevos…</p>';
+    if (d.relevosError) {
+      return '<div class="notice notice--warn"><strong>No pude cargar los relevos.</strong> ' +
+        esc(d.relevosError) +
+        '<div class="notice-actions"><button class="btn btn--outline btn--small" data-action="detalle-reintentar-relevos">Reintentar</button></div></div>';
+    }
+    if (!d.relevos.length) {
+      return emptyState("⇄", "Sin relevos todavía",
+        "Cuando alguien deje el proyecto, el traspaso aparecerá aquí y en RELEVO.md.") +
+        '<div class="form-actions"><button class="btn btn--primary" data-action="detalle-dejar" data-id="' +
+        esc(d.proyecto.id) + '">Dejar proyecto</button></div>';
+    }
+
+    const ultimo = d.relevos[0];
+    const historial = d.relevos.slice(1);
+    const historialHtml = historial.length
+      ? '<div class="detail-section"><h4>Historial (' + historial.length + ")</h4>" +
+        historial.map((r) => '<details class="relevo-hist"><summary>' +
+          esc(fmtDateTime(r.created_at)) + " · " + esc(nombrePerfil(r.autor)) + " · " +
+          esc(RELEVO_LABEL[r.estado] || r.estado) + "</summary>" +
+          relevoCardHtml(r) + "</details>").join("") + "</div>"
+      : "";
+
+    return '<div class="detail-section" style="margin-top:0;padding-top:0;border-top:0">' +
+      '<h4>Último relevo</h4>' + relevoCardHtml(ultimo, { destacado: true }) +
+      '<div class="form-actions">' +
+      '<button class="btn btn--primary" data-action="detalle-dejar" data-id="' + esc(d.proyecto.id) + '">Dejar proyecto</button>' +
+      '<button class="btn btn--outline" data-action="detalle-retomar" data-id="' + esc(d.proyecto.id) + '">Retomar</button>' +
+      "</div></div>" + historialHtml;
+  }
+
+  async function cargarRelevosDetalle() {
+    const d = detalleProyecto;
+    if (!d) return;
+    d.cargandoRelevos = true;
+    d.relevosError = "";
+    renderDetallePanel();
+    try {
+      const { data, error } = await db.from("relevos").select("*")
+        .eq("proyecto_id", d.proyecto.id)
+        .order("created_at", { ascending: false })
+        .limit(30);
+      if (error) throw error;
+      if (detalleProyecto !== d) return;
+      d.relevos = data || [];
+    } catch (error) {
+      if (detalleProyecto !== d) return;
+      d.relevosError = errMsg(error);
+    } finally {
+      if (detalleProyecto === d) {
+        d.cargandoRelevos = false;
+        renderDetallePanel();
+      }
+    }
+  }
+
+  async function cargarGitDetalle() {
+    const d = detalleProyecto;
+    if (!d) return;
+    if (!d.ruta) {
+      d.git = null;
+      d.gitError = "";
+      renderDetallePanel();
+      return;
+    }
+    const err = errorRutaLocal(d.ruta);
+    if (err) {
+      d.git = null;
+      d.gitError = err;
+      renderDetallePanel();
+      return;
+    }
+    d.cargandoGit = true;
+    d.gitError = "";
+    renderDetallePanel();
+    try {
+      const datos = await fetchOrquestador(
+        "/git?ruta=" + encodeURIComponent(d.ruta) + "&limite=15", {}, 12000
+      );
+      if (detalleProyecto !== d) return;
+      d.git = datos;
+    } catch (error) {
+      if (detalleProyecto !== d) return;
+      d.git = null;
+      d.gitError = mensajeOrquestador(error);
+    } finally {
+      if (detalleProyecto === d) {
+        d.cargandoGit = false;
+        renderDetallePanel();
+      }
+    }
+  }
+
+  function guardarRutaDetalle() {
+    const d = detalleProyecto;
+    const input = $("#detalle-ruta-input");
+    if (!d || !input) return;
+    const ruta = input.value.trim();
+    if (ruta) {
+      const err = errorRutaLocal(ruta);
+      if (err) {
+        toast(err, true);
+        input.focus();
+        return;
+      }
+    }
+    const p = d.proyecto;
+    const guardar = ruta && ruta !== (p.ruta_local || "") ? ruta : "";
+    if (!guardarRutaLocalStorage(p.id, guardar)) return;
+    d.ruta = guardar || p.ruta_local || "";
+    toast(guardar ? "Ruta guardada para este navegador." :
+      "Se usará la ruta configurada en el proyecto.");
+    renderDetalleRuta();
+    cargarGitDetalle();
+  }
+
+  async function resumirDetalle() {
+    const d = detalleProyecto;
+    if (!d || !d.ruta) return;
+    d.resumenCargando = true;
+    d.resumenError = "";
+    renderDetallePanel();
+    try {
+      const datos = await fetchOrquestador("/resumir", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ruta: d.ruta })
+      }, 60000);
+      if (detalleProyecto !== d) return;
+      d.resumen = String(datos.resumen || "").trim() || "El orquestador no devolvió texto.";
+    } catch (error) {
+      if (detalleProyecto !== d) return;
+      d.resumenError = mensajeOrquestador(error);
+    } finally {
+      if (detalleProyecto === d) {
+        d.resumenCargando = false;
+        renderDetallePanel();
+      }
+    }
+  }
+
+  function abrirDejarProyecto(id) {
+    const p = state.proyectos.find((x) => String(x.id) === String(id));
+    if (!p) return;
+    const ruta = rutaEfectivaProyecto(p);
+    const rama = detalleProyecto && String(detalleProyecto.proyecto.id) === String(p.id) && detalleProyecto.git
+      ? (detalleProyecto.git.rama || "") : "";
+    const commit = detalleProyecto && String(detalleProyecto.proyecto.id) === String(p.id) && detalleProyecto.git &&
+      detalleProyecto.git.commits && detalleProyecto.git.commits[0]
+      ? (detalleProyecto.git.commits[0].hash || detalleProyecto.git.commits[0].corto || "") : "";
+    const estadoInicial = p.estado === "entregado" ? "terminado"
+      : p.estado === "pausado" ? "pausado" : "en_progreso";
+
+    openModal(
+      '<div class="modal-head"><div class="modal-head-main">' +
+      '<div class="modal-title">Dejar proyecto</div>' +
+      '<div class="modal-sub">' + esc(p.nombre) + " · guarda el traspaso en Supabase y en RELEVO.md</div>" +
+      "</div>" +
+      '<button class="modal-close" data-action="close-modal" aria-label="Cerrar">✕</button></div>' +
+      '<form id="relevo-form" data-proyecto="' + esc(p.id) + '">' +
+      '<div class="modal-body">' +
+      '<div class="notice notice--info"><strong>Cómo funciona.</strong> Al guardar se crea un relevo en Supabase. ' +
+      "Si el orquestador está arriba, también escribe <code>RELEVO.md</code> en la ruta local del proyecto.</div>" +
+      (!ruta ? '<div class="notice notice--warn"><strong>Sin ruta local.</strong> El relevo se guardará en Supabase, ' +
+        "pero no se podrá escribir RELEVO.md. Configúrala en «Editar proyecto».</div>" : "") +
+      '<div class="form-grid">' +
+      '<div class="field"><label for="rel-estado">Estado</label><select id="rel-estado" name="estado">' +
+      options(RELEVO_ESTADOS, RELEVO_LABEL, estadoInicial) + "</select></div>" +
+      '<div class="field"><label for="rel-ruta">Ruta local</label><input id="rel-ruta" value="' + esc(ruta) + '" readonly></div>' +
+      '<div class="field field--full"><label for="rel-hecho">Qué hice</label>' +
+      '<textarea id="rel-hecho" name="hecho" placeholder="Resumen de lo que quedó funcionando…"></textarea></div>' +
+      '<div class="field field--full"><label for="rel-falta">Qué falta</label>' +
+      '<textarea id="rel-falta" name="pendientes" placeholder="Tareas concretas que siguen abiertas…"></textarea></div>' +
+      '<div class="field field--full"><label for="rel-decisiones">Decisiones</label>' +
+      '<textarea id="rel-decisiones" name="decisiones" placeholder="Decisiones técnicas o de producto que no hay que reabrir…"></textarea></div>' +
+      '<div class="field field--full"><label for="rel-siguiente">Siguiente paso</label>' +
+      '<textarea id="rel-siguiente" name="siguiente" placeholder="Lo primero que debe hacer quien retome…"></textarea></div>' +
+      '<input type="hidden" id="rel-rama" name="rama" value="' + esc(rama) + '">' +
+      '<input type="hidden" id="rel-commit" name="commit" value="' + esc(commit) + '">' +
+      '<p id="relevo-form-error" class="form-error" hidden></p>' +
+      "</div></div>" +
+      '<div class="modal-foot">' +
+      '<button type="button" class="btn btn--outline" data-action="generar-borrador"' + (ruta ? "" : " disabled") + ">Generar borrador</button>" +
+      '<span class="spacer"></span>' +
+      '<button type="button" class="btn btn--ghost" data-action="close-modal">Cancelar</button>' +
+      '<button type="submit" class="btn btn--primary">Guardar relevo</button>' +
+      "</div></form>",
+      "wide"
+    );
+  }
+
+  async function generarBorradorRelevo(btn) {
+    const form = $("#relevo-form");
+    if (!form) return;
+    const p = state.proyectos.find((x) => String(x.id) === String(form.dataset.proyecto));
+    if (!p) return;
+    const ruta = rutaEfectivaProyecto(p);
+    if (!ruta) {
+      toast("Configura la ruta local del proyecto antes de generar el borrador.", true);
+      return;
+    }
+    const campos = ["rel-hecho", "rel-falta", "rel-decisiones", "rel-siguiente"];
+    const tieneTexto = campos.some((id) => {
+      const el = $("#" + id);
+      return el && el.value.trim();
+    });
+    if (tieneTexto && !window.confirm("El borrador reemplazará lo que escribiste. ¿Continuar?")) return;
+
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Generando…";
+    try {
+      const datos = await fetchOrquestador("/relevo/borrador", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ruta })
+      }, 60000);
+      const b = datos.borrador || {};
+      const set = (id, value) => {
+        const el = $("#" + id);
+        if (el && value !== undefined && value !== null) el.value = String(value);
+      };
+      if (RELEVO_ESTADOS.includes(b.estado)) $("#rel-estado").value = b.estado;
+      set("rel-hecho", b.hecho);
+      set("rel-falta", b.pendientes);
+      set("rel-decisiones", b.decisiones);
+      set("rel-siguiente", b.siguiente);
+      set("rel-rama", b.rama);
+      set("rel-commit", b.commit);
+      toast("Borrador generado. Revísalo antes de guardar.");
+    } catch (error) {
+      const message = mensajeOrquestador(error);
+      const errorEl = $("#relevo-form-error");
+      if (errorEl) {
+        errorEl.textContent = "No se pudo generar el borrador: " + message;
+        errorEl.hidden = false;
+      }
+      toast("No se pudo generar el borrador. Puedes escribirlo a mano.", true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  }
+
+  function formatearRelevoMd(p, datos) {
+    const linea = (v) => String(v || "").trim() || "(sin detalle)";
+    return "# Relevo — " + p.nombre + "\n\n" +
+      "- **Fecha:** " + fmtDateTime(new Date().toISOString()) + "\n" +
+      "- **Autor:** " + state.perfil.nombre + "\n" +
+      "- **Estado:** " + (RELEVO_LABEL[datos.estado] || datos.estado) + "\n" +
+      "- **Rama:** " + (datos.rama || "sin registrar") + "\n" +
+      "- **Commit:** " + (datos.commit || "sin registrar") + "\n\n" +
+      "## Qué hice\n\n" + linea(datos.hecho) + "\n\n" +
+      "## Qué falta\n\n" + linea(datos.pendientes) + "\n\n" +
+      "## Decisiones\n\n" + linea(datos.decisiones) + "\n\n" +
+      "## Siguiente paso\n\n" + linea(datos.siguiente) + "\n\n" +
+      "_Actualizado desde el panel de la agencia._\n";
+  }
+
+  async function guardarRelevo(form) {
+    const fd = new FormData(form);
+    const id = form.dataset.proyecto;
+    const p = state.proyectos.find((x) => String(x.id) === String(id));
+    if (!p) return;
+
+    const datos = {
+      estado: String(fd.get("estado") || "en_progreso"),
+      hecho: String(fd.get("hecho") || "").trim(),
+      pendientes: String(fd.get("pendientes") || "").trim(),
+      decisiones: String(fd.get("decisiones") || "").trim(),
+      siguiente: String(fd.get("siguiente") || "").trim(),
+      rama: String(fd.get("rama") || "").trim() || null,
+      commit: String(fd.get("commit") || "").trim() || null
+    };
+    const errorEl = $("#relevo-form-error");
+    const submit = form.querySelector('button[type="submit"]');
+
+    if (!datos.hecho && !datos.pendientes) {
+      if (errorEl) {
+        errorEl.textContent = "Escribe al menos qué hiciste o qué falta.";
+        errorEl.hidden = false;
+      }
+      return;
+    }
+
+    if (submit) {
+      submit.disabled = true;
+      submit.textContent = "Guardando…";
+    }
+
+    try {
+      const { error } = await db.from("relevos").insert({
+        proyecto_id: p.id,
+        autor: state.perfil.user_id,
+        estado: datos.estado,
+        hecho: datos.hecho,
+        pendientes: datos.pendientes,
+        decisiones: datos.decisiones,
+        siguiente: datos.siguiente,
+        rama: datos.rama,
+        commit: datos.commit
+      });
+      if (error) throw error;
+    } catch (error) {
+      if (errorEl) {
+        errorEl.textContent = errMsg(error);
+        errorEl.hidden = false;
+      }
+      if (submit) {
+        submit.disabled = false;
+        submit.textContent = "Guardar relevo";
+      }
+      return;
+    }
+
+    const ruta = rutaEfectivaProyecto(p);
+    let archivoError = "";
+    if (ruta) {
+      try {
+        await fetchOrquestador("/relevo/archivo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ruta, contenido: formatearRelevoMd(p, datos) })
+        }, 30000);
+      } catch (error) {
+        archivoError = mensajeOrquestador(error);
+      }
+    } else {
+      archivoError = "El proyecto no tiene ruta local configurada.";
+    }
+
+    closeModal();
+    if (archivoError) {
+      toast("Relevo guardado en Supabase. No se pudo escribir RELEVO.md: " + archivoError, true);
+    } else {
+      toast("Relevo guardado y RELEVO.md actualizado.");
+    }
+    openProyectoDetalle(p.id, { tab: "relevo" });
+  }
+
+  function textoRetomar(p, r) {
+    const autor = nombrePerfil(r.autor);
+    const linea = (v) => String(v || "").trim() || "(sin registrar)";
+    return "Estás retomando el proyecto «" + p.nombre + "».\n\n" +
+      "Lee RELEVO.md y docs/relevos/ antes de tocar código.\n\n" +
+      "Estado: " + (RELEVO_LABEL[r.estado] || r.estado || "sin registrar") + "\n" +
+      "Qué se hizo: " + linea(r.hecho) + "\n" +
+      "Pendientes: " + linea(r.pendientes) + "\n" +
+      "Decisiones: " + linea(r.decisiones) + "\n" +
+      "Siguiente paso: " + linea(r.siguiente) + "\n" +
+      "Rama: " + (r.rama || "sin registrar") + "\n" +
+      "Commit: " + (r.commit || "sin registrar") + "\n" +
+      "Relevo de: " + autor + " · " + fmtDateTime(r.created_at) + "\n\n" +
+      "No rehagas lo hecho. Continúa desde el siguiente paso y anota lo que decidas en el próximo relevo.";
+  }
+
+  async function abrirRetomar(id) {
+    const p = state.proyectos.find((x) => String(x.id) === String(id));
+    if (!p) return;
+    let relevo = null;
+    if (detalleProyecto && String(detalleProyecto.proyecto.id) === String(p.id) && detalleProyecto.relevos.length) {
+      relevo = detalleProyecto.relevos[0];
+    } else {
+      try {
+        const { data, error } = await db.from("relevos").select("*")
+          .eq("proyecto_id", p.id)
+          .order("created_at", { ascending: false })
+          .limit(1);
+        if (error) throw error;
+        relevo = (data || [])[0];
+      } catch (error) {
+        toast("No se pudo cargar el relevo: " + errMsg(error), true);
+        return;
+      }
+    }
+    if (!relevo) {
+      toast("Este proyecto todavía no tiene un relevo para retomar.", true);
+      return;
+    }
+
+    openModal(
+      '<div class="modal-head"><div class="modal-head-main">' +
+      '<div class="modal-title">Retomar ' + esc(p.nombre) + "</div>" +
+      '<div class="modal-sub">Copia este texto y pégalo en el chat de tu agente.</div></div>' +
+      '<button class="modal-close" data-action="close-modal" aria-label="Cerrar">✕</button></div>' +
+      '<div class="modal-body">' +
+      '<textarea id="retomar-texto" class="copy-box" readonly rows="16" aria-label="Texto para retomar el proyecto">' +
+      esc(textoRetomar(p, relevo)) + "</textarea>" +
+      "</div>" +
+      '<div class="modal-foot"><button class="btn btn--ghost" data-action="close-modal">Cerrar</button>' +
+      '<button class="btn btn--primary" data-action="copiar-retomar">Copiar texto</button></div>',
+      "wide"
+    );
+  }
+
+  async function copiarRetomar() {
+    const area = $("#retomar-texto");
+    if (!area) return;
+    const texto = area.value;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(texto);
+      } else {
+        area.focus();
+        area.select();
+        if (!document.execCommand("copy")) throw new Error("El navegador bloqueó el portapapeles.");
+      }
+      toast("Texto copiado. Pégalo en el chat del agente que retoma.");
+    } catch (error) {
+      area.focus();
+      area.select();
+      toast("No se pudo copiar automáticamente: el texto quedó seleccionado.", true);
     }
   }
 
@@ -1116,6 +2023,8 @@
   function closeModal() {
     modalRoot.innerHTML = "";
     document.body.style.overflow = "";
+    detalleProyecto = null;
+    state.mensajeAbiertoId = null;
   }
 
   function openConfirm(opts) {
@@ -1171,6 +2080,10 @@
         break;
       }
       case "logout": {
+        stopMensajesPoll();
+        state.mensajes = [];
+        state.mensajesError = "";
+        updateMensajesBadge();
         await db.auth.signOut();
         state.perfil = null;
         showLogin();
@@ -1187,6 +2100,30 @@
       case "close-modal": closeModal(); break;
       case "correr-sistema": await correrSistema(el); break;
       case "abrir-openbot": await abrirOpenBot(el); break;
+      case "abrir-mensajes": abrirMensajes(); break;
+      case "mensajes-tab": cambiarTabMensajes(el.dataset.tab); break;
+      case "abrir-mensaje": abrirMensaje(el.dataset.id); break;
+      case "refrescar-mensajes": await loadMensajes(); break;
+      case "detalle-proyecto": openProyectoDetalle(el.dataset.id); break;
+      case "detalle-tab": {
+        if (!detalleProyecto) break;
+        detalleProyecto.tab = el.dataset.tab === "relevo" ? "relevo" : "git";
+        renderDetallePanel();
+        break;
+      }
+      case "guardar-ruta-detalle": guardarRutaDetalle(); break;
+      case "detalle-reintentar-git": await cargarGitDetalle(); break;
+      case "detalle-reintentar-relevos": await cargarRelevosDetalle(); break;
+      case "resumir-proyecto": await resumirDetalle(); break;
+      case "detalle-dejar": abrirDejarProyecto(el.dataset.id); break;
+      case "detalle-retomar": await abrirRetomar(el.dataset.id); break;
+      case "detalle-editar": {
+        detalleProyecto = null;
+        openProyectoModal(el.dataset.id);
+        break;
+      }
+      case "generar-borrador": await generarBorradorRelevo(el); break;
+      case "copiar-retomar": await copiarRetomar(); break;
       case "lead": openLead(el.dataset.id); break;
       case "more-leads": {
         state.leadLimit += 60;
@@ -1248,11 +2185,23 @@
     } else if (event.target.id === "proyecto-form") {
       event.preventDefault();
       await saveProyecto(event.target);
+    } else if (event.target.id === "mensaje-form") {
+      event.preventDefault();
+      await enviarMensaje(event.target);
+    } else if (event.target.id === "relevo-form") {
+      event.preventDefault();
+      await guardarRelevo(event.target);
     }
   });
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeModal();
+    if ((event.key === "Enter" || event.key === " ") &&
+      event.target && event.target.matches &&
+      event.target.matches('[role="button"][data-action]')) {
+      event.preventDefault();
+      event.target.click();
+    }
   });
 
   modalRoot.addEventListener("click", (event) => {
