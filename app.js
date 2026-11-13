@@ -267,7 +267,7 @@
     try {
       const [leads, interacciones, clientes, proyectos, perfiles] = await Promise.all([
         db.from("leads")
-          .select("id,negocio,rubro,comuna,direccion,telefono,email,instagram,sitio_web,score,estado,oferta_sugerida,owner,notas,demo_url,ultimo_contacto,created_at,updated_at")
+          .select("id,negocio,rubro,comuna,direccion,telefono,email,instagram,sitio_web,web_estado,web_fuente,score,estado,oferta_sugerida,owner,notas,demo_url,ultimo_contacto,created_at,updated_at")
           .order("created_at", { ascending: false }).limit(1000),
         db.from("interacciones")
           .select("id,lead_id,ronda,canal,asunto,resumen,cuerpo,estado,aprobado_por,enviado_at,created_at")
@@ -896,6 +896,13 @@
     const web = safeUrl(lead.sitio_web)
       ? '<a href="' + esc(safeUrl(lead.sitio_web)) + '" target="_blank" rel="noopener">' + esc(lead.sitio_web) + " ↗</a>"
       : "—";
+    const verificacionWeb =
+      {
+        propia: "Tiene web propia · descartado",
+        social: "Solo redes sociales",
+        ninguna: "Confirmado sin web",
+        desconocida: "Sin verificar en Maps",
+      }[lead.web_estado] || "Sin verificar";
     const demo = safeUrl(lead.demo_url)
       ? '<a class="btn btn--outline btn--small" href="' + esc(safeUrl(lead.demo_url)) + '" target="_blank" rel="noopener">Ver maqueta ↗</a>'
       : "";
@@ -906,6 +913,7 @@
       '<div class="detail-item"><div class="detail-label">Teléfono</div><div class="detail-value">' + tel + "</div></div>" +
       '<div class="detail-item"><div class="detail-label">Instagram</div><div class="detail-value">' + instagram + "</div></div>" +
       '<div class="detail-item"><div class="detail-label">Sitio web</div><div class="detail-value">' + web + "</div></div>" +
+      '<div class="detail-item"><div class="detail-label">Verificación web</div><div class="detail-value">' + esc(verificacionWeb) + "</div></div>" +
       '<div class="detail-item"><div class="detail-label">Score</div><div class="detail-value">' + scoreBadge(lead.score) + "</div></div>" +
       '<div class="detail-item"><div class="detail-label">Responsable</div><div class="detail-value">' + esc(lead.owner || "Sin asignar") + "</div></div>" +
       '<div class="detail-item"><div class="detail-label">Último contacto</div><div class="detail-value">' + esc(fmtDateTime(lead.ultimo_contacto)) + "</div></div>" +
