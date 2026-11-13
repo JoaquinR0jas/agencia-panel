@@ -806,15 +806,33 @@
     return rows;
   }
 
-  function whatsappUrl(telefono, negocio, demo) {
+  function whatsappUrl(telefono, negocio, demo, comuna) {
     const digitos = String(telefono || "").replace(/\D/g, "");
     if (digitos.length < 8) return "";
     const numero = digitos.startsWith("56") ? digitos : "56" + digitos.replace(/^0+/, "");
-    let texto = "Hola " + String(negocio || "").trim() +
-      ", soy Joaquín. Vi su negocio y armé una maqueta de cómo podría verse su página.";
-    if (safeUrl(demo)) texto += " Se la dejo acá: " + safeUrl(demo);
-    texto += " ¿Le doy una mirada?";
-    return "https://wa.me/" + numero + "?text=" + encodeURIComponent(texto);
+    const nombre = String(negocio || "").trim();
+    const zona = String(comuna || "").trim();
+    const enZona = zona ? " de " + zona : "";
+    const enlace = safeUrl(demo);
+
+    const partes = enlace
+      ? [
+        "Hola " + nombre + ", soy Joaquín Rojas. Estuve mirando negocios" + enZona +
+          " y me tomé el tiempo de armar una maqueta de cómo podría verse la página web de " + nombre + ".",
+        "Se la dejo acá para que la mire con calma: " + enlace,
+        "La idea es que alguien que los busca en Google encuentre al tiro los horarios, la ubicación, las fotos y una forma directa de escribirles por WhatsApp, sin depender solo de Instagram.",
+        "No es una propuesta cerrada. Si les gusta, la adapto con su logo, sus fotos y sus precios, y la dejo funcionando en pocos días. Si no, no hay problema: igual les sirve para comparar con lo que tienen hoy.",
+        "¿La revisan y me dicen qué les parece?",
+      ]
+      : [
+        "Hola " + nombre + ", soy Joaquín Rojas. Estuve mirando negocios" + enZona +
+          " y me puse a imaginar cómo podría verse una página web que de verdad les sirva: simple, rápida y pensada para celular.",
+        "Trabajo armando sitios para negocios pequeños. La idea no es tener una página por tenerla, sino que alguien que los busca encuentre los horarios, la ubicación, las fotos y una forma directa de escribirles por WhatsApp.",
+        "Si les interesa, les armo una maqueta sin costo para que la vean antes de decidir. Si no, no hay problema.",
+        "¿Les parece si les cuento en dos minutos cómo quedaría?",
+      ];
+
+    return "https://wa.me/" + numero + "?text=" + encodeURIComponent(partes.join("\n\n"));
   }
 
   function renderLeadTable() {
@@ -837,6 +855,7 @@
         const wa = l.telefono && !l.email
           ? '<button class="btn btn--outline btn--small" data-action="whatsapp" data-phone="' + esc(l.telefono) +
             '" data-negocio="' + esc(l.negocio) + '" data-demo="' + esc(l.demo_url || "") +
+            '" data-comuna="' + esc(l.comuna || "") +
             '" style="margin-top:6px">WhatsApp</button>'
           : "";
         return '<tr class="is-clickable" data-action="lead" data-id="' + esc(l.id) + '">' +
@@ -938,7 +957,7 @@
     const demo = safeUrl(lead.demo_url)
       ? '<a class="btn btn--outline btn--small" href="' + esc(safeUrl(lead.demo_url)) + '" target="_blank" rel="noopener">Ver maqueta ↗</a>'
       : "";
-    const wa = whatsappUrl(lead.telefono, lead.negocio, lead.demo_url);
+    const wa = whatsappUrl(lead.telefono, lead.negocio, lead.demo_url, lead.comuna);
 
     body.innerHTML =
       '<div class="detail-grid">' +
@@ -2167,7 +2186,7 @@
       case "generar-borrador": await generarBorradorRelevo(el); break;
       case "copiar-retomar": await copiarRetomar(); break;
       case "whatsapp": {
-        const url = whatsappUrl(el.dataset.phone, el.dataset.negocio, el.dataset.demo);
+        const url = whatsappUrl(el.dataset.phone, el.dataset.negocio, el.dataset.demo, el.dataset.comuna);
         if (url) window.open(url, "_blank", "noopener");
         else toast("Ese teléfono no sirve para WhatsApp.", true);
         break;
