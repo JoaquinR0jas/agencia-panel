@@ -43,6 +43,10 @@ El envío de correos sigue siendo manual: el orquestador nunca ejecuta `enviar`.
 - `leads`, `interacciones` y `eventos` son de solo lectura/actualización para el
   panel; no se pueden insertar ni borrar desde aquí.
 - El panel no envía correos ni modifica la lógica de captación.
+- Chrome puede pedir permiso para acceder a la red local o bloquear la llamada
+  directa desde la página pública. En ese caso usa **Centro de control**: la
+  página local abre en una pestaña y desde ahí los botones funcionan sin esa
+  restricción.
 
 ## Estructura
 

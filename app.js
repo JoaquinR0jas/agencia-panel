@@ -1091,7 +1091,7 @@
         toast("OpenBot abierto. Dale unos segundos para cargar.");
       }
     } catch (error) {
-      toast("No pude abrir OpenBot. Revisa que el centro de control esté corriendo.", true);
+      toast("No pude llamar al centro de control. Si está corriendo, el navegador pudo bloquear el acceso local: usa el botón Centro de control.", true);
     } finally {
       if (btn) {
         btn.disabled = false;
