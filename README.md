@@ -22,7 +22,18 @@ una fila **activa** en la tabla `perfiles`.
   sola transacción. **No envía correos.**
 - CRUD de clientes y proyectos (montos, fechas, repo y demo).
 - Página de equipo con perfiles y roles.
+- **Centro de control** y **Abrir OpenBot** en el encabezado: abren el centro
+  local (`http://127.0.0.1:8787/`) y lanzan o enfocan OpenBot.
+- **Correr sistema**: dispara `corrida` + `seguimiento` en el orquestador local.
 - Enlaces directos al proyecto de Supabase.
+
+## Centro de control local
+
+Con el orquestador del repo de captación corriendo (`npm run orquestador`), el
+encabezado ofrece **Centro de control**, **Abrir OpenBot** y **Correr sistema**.
+La página `http://127.0.0.1:8787/` reúne las cuatro tarjetas: correr sistema,
+abrir OpenBot, abrir panel y equipo (bandeja por rol + formulario de tareas).
+El envío de correos sigue siendo manual: el orquestador nunca ejecuta `enviar`.
 
 ## Seguridad
 

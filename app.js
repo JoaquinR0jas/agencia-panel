@@ -225,6 +225,8 @@
       showLogin("No se pudo cargar la configuración del panel. Revisa config.js.");
       return;
     }
+    const centro = $("#btn-centro-control");
+    if (centro) centro.href = ORQUESTADOR_URL + "/";
     const { data } = await db.auth.getSession();
     if (data && data.session) {
       await enterApp(data.session);
@@ -1072,6 +1074,32 @@
     setTimeout(consultar, 600);
   }
 
+  async function abrirOpenBot(btn) {
+    if (btn && btn.disabled) return;
+    const textoOriginal = btn ? btn.textContent : "";
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Abriendo…";
+    }
+    try {
+      const res = await fetch(ORQUESTADOR_URL + "/abrir-openbot", { method: "POST" });
+      const datos = await res.json().catch(() => ({}));
+      if (!res.ok || !datos.abierto) throw new Error(datos.error || "HTTP " + res.status);
+      if (datos.yaEstaba) {
+        toast(datos.enfocado ? "OpenBot ya estaba abierto; lo traje al frente." : "OpenBot ya estaba abierto.");
+      } else {
+        toast("OpenBot abierto. Dale unos segundos para cargar.");
+      }
+    } catch (error) {
+      toast("No pude abrir OpenBot. Revisa que el centro de control esté corriendo.", true);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = textoOriginal || "Abrir OpenBot";
+      }
+    }
+  }
+
   /* ------------------------------------------------------------------ */
   /* Modales y confirmaciones                                            */
   /* ------------------------------------------------------------------ */
@@ -1158,6 +1186,7 @@
       case "close-menu": closeMenu(); break;
       case "close-modal": closeModal(); break;
       case "correr-sistema": await correrSistema(el); break;
+      case "abrir-openbot": await abrirOpenBot(el); break;
       case "lead": openLead(el.dataset.id); break;
       case "more-leads": {
         state.leadLimit += 60;

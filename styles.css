@@ -228,7 +228,7 @@ h1, h2, h3, h4, p { margin: 0; }
   font-family: var(--serif); font-size: 24px; font-weight: 600;
   letter-spacing: -.02em; line-height: 1.15;
 }
-.topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .menu-btn { display: none; }
 .user-chip { display: flex; align-items: center; gap: 9px; padding-left: 8px; border-left: 1px solid var(--line); }
 .user-chip-text { display: grid; line-height: 1.2; }
